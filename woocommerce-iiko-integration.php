@@ -27,4 +27,5 @@ function woocommerce_iiko_init(){
     require_once 'includes/woocommerce-iiko-init-class.php';
     require_once 'includes/woocommerce-iiko-product-meta.php';
     require_once 'includes/woocommerce-iiko-settings-tab.php';
+    require_once 'includes/communication.php';
 }
