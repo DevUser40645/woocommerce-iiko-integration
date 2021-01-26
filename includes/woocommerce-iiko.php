@@ -37,7 +37,7 @@ if ( ! class_exists( 'WC_IIKO_API' ) ) {
             self::$access_token = self::get_iiko_access_token();
             self::$organization_id = self::get_iiko_organization_id()[0]->id;
             $items_for_request = self::get_order_info_for_request( $order_id );
-            var_dump($items_for_request);
+//            var_dump($items_for_request);
         }
 
         protected static function get_iiko_access_token() {
@@ -68,8 +68,73 @@ if ( ! class_exists( 'WC_IIKO_API' ) ) {
             return $nomenclatures->products;
         }
 
+        protected static function get_create_iiko_customer( $order, $userPhone ){
+            $userPhone = '71235678901';
+            $requestUrl = self::$api_url . 'customers/get_customer_by_phone?access_token='. self::$access_token . '&organization='. self::$organization_id . '&phone=' . $userPhone;
+            $communication = new Communication();
+            $customer = $communication::httpGetRequest($requestUrl);
+
+            if ( isset($customer->message) && strripos( $customer->message, 'There is no user with phone') == false ) {
+
+                $requestUrl = self::$api_url . 'customers/create_or_update?access_token='. self::$access_token . '&organization='. self::$organization_id;
+                $postFields = array(
+                    'customer' => array(
+                        'name'          => $order->get_billing_first_name(),
+                        'phone'         => $userPhone,
+                        'email'         => $order->get_billing_email(),
+                        'surName'       => $order->get_billing_last_name(),
+                        'consentStatus' => '1'
+                    ),
+                );
+                $customer = $communication::httpPostRequest($requestUrl, json_encode($postFields));
+            }
+            return $customer->id;
+
+        }
+
+        protected static function get_formatted_phone($phone, $mask = '#', $codeSplitter = '0') {
+            $format = array(
+                '13'=>'+############', // for +38 0XX XX XXX XX or 38 0XX XX XXX XX
+                '10'=>'+38##########', // for 0XX XX XXX XX
+                '9'=>'+380##########' // for XX XX XXX XX
+            );
+
+            $phone = preg_replace('/[^0-9]/', '', $phone);
+
+            if (is_array($format)) {
+                if (array_key_exists(strlen($phone), $format)) {
+                    $format = $format[strlen($phone)];
+                } else {
+                    return $phone;
+                }
+            }
+
+            $pattern = '/' . str_repeat('([0-9])?', substr_count($format, $mask)) . '(.*)/';
+
+            $format = preg_replace_callback(
+                str_replace('#', $mask, '/([#])/'),
+                function () use (&$counter)  {
+                    return '${' . (++$counter) . '}';
+                },
+                $format
+            );
+
+            return ($phone) ? trim(preg_replace($pattern, $format, $phone, 1)) : false;
+        }
+
+        protected static function get_payment_methods(){
+            $requestUrl = self::$api_url . 'rmsSettings/getPaymentTypes?organization='. self::$organization_id . '&access_token='. self::$access_token;
+            $communication = new Communication();
+            $payment_methods = $communication::httpGetRequest($requestUrl);
+            var_dump($payment_methods);
+
+        }
+
         protected static function get_order_info_for_request( $order_id ) {
             $order = wc_get_order( $order_id );
+            $billing_phone = self::get_formatted_phone( $order->get_billing_phone() );
+            $iiko_customer = self::get_create_iiko_customer( $order, $billing_phone );
+            $payment_methods = self::get_payment_methods();
             $array_product = array();
             // Get and Loop Over Order Items
             foreach ( $order->get_items() as $item_id => $item ) {
@@ -89,45 +154,41 @@ if ( ! class_exists( 'WC_IIKO_API' ) ) {
             }
 
 //            $order_details = array(
-//                "organization" => $organizationId,
-//                "deliveryTerminalId" => $deliveryTerminalId,
+//                "organization" => self::$organization_id,
 //                "customer" => array(
-//                    "id" => $customerId,
-//                    "name" => "Asabix",
-//                    "phone" => "+380979981891",
-//                    "email" => "ask@asabix.com"
+//                    "id" => $iiko_customer,
+//                    "name" => $order->get_billing_first_name(),
+//                    "phone" => $billing_phone,
+//                    "email" => $order->get_billing_email()
 //                ),
 //                "order" => array(
-//                    "date" => $deliveryDate,
-//                    "phone" => "+380979981891",
-//                    "customerName" => "Asabix",
-//                    "fullSum" => "613.00",
-//                    "isSelfService" => true,
-//                    "orderTypeId" => $orderTypeId,
-//                    "personsCount" => $personsCount,
-//                    "marketingSourceId" => $marketingSourceId,
+//                    "date" => $order->get_date_created();,
+//                    "phone" => $billing_phone,
+//                    "customerName" => $order->get_billing_first_name() . ' ' . $order->get_billing_last_name(),
+//                    "fullSum" => $order->get_total();,
+//                    "isSelfService" => 'false',
 //                    "items" => $array_product
 //                ),
 //                "address" => array(
-//                    "city" => "Zhytomyr",
-//                    "street" => "Vitruka",
-//                    "home" => "9v",
+//                    "city" => $order->get_billing_city();,
+//                    "street" => $order->get_billing_address_1();,
+//                    "home" => $order->get_billing_address_2();,
 //                    "housing" => null,
 //                    "apartment" => null,
 //                    "entrance" => null,
 //                    "floor" => null,
 //                    "doorphone" => null,
-//                    "comment" => "From Small To Extra Large. Everywhere. Everytime"
+//                    "comment" => $order->get_customer_note();
 //                ),
 //                "paymentItems" => array(
-//                    "sum"  => "613.00",
+//                    "sum"  => $order->get_total();,
 //                    "paymentType"  => array(
 //                        "id"  => $paymentTypeId,
 //                        "code"  => $paymentTypeCode,
 //                        "name"  => "",
 //                        "comment"  => "full"
 //                    ),
-//                    "isProcessedExternally"  => false
+//                    "isProcessedExternally"  => true
 //                )
 //            );
 
