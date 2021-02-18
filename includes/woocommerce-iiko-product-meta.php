@@ -60,19 +60,20 @@ if ( ! class_exists( 'WC_IIKO_PRODUCT_META' ) ) {
 
         public function woocommerce_term_production_fields( $loop, $variation_data, $variation ) {
             woocommerce_wp_text_input( array(
-                'id'                => 'iiko_product_id', // id поля
+                'id'                => 'iiko_product_id' . $variation->ID, // id поля
                 'label'             => 'Iiko product id', // Надпись над полем
                 'description'       => 'Enter the Iiko product id this product',// Описание поля
                 'desc_tip'          => 'true', // Всплывающая подсказка
                 'type'              => 'text', // Тип поля
                 'value'             => get_post_meta( $variation->ID, 'iiko_product_id', true ),
             ) );
+
         }
 
-        function woocommerce_save_variation_settings_fields( $post_id ) {
-            $woocommerce__term_prod_var = $_POST['iiko_product_id'][ $post_id ];
-            if (isset($woocommerce__term_prod_var) && ! empty( $woocommerce__term_prod_var ) ) {
-                update_post_meta( $post_id, 'iiko_product_id', esc_attr( $woocommerce__term_prod_var ) );
+        public function woocommerce_save_variation_settings_fields( $variation_id ) {
+
+            if (isset($_POST['iiko_product_id'.$variation_id]) && ! empty( $_POST['iiko_product_id'.$variation_id] ) ) {
+                update_post_meta( $variation_id, 'iiko_product_id', sanitize_text_field( $_POST['iiko_product_id'.$variation_id] ) );
             }
         }
 

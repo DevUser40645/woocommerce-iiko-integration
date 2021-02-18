@@ -34,45 +34,58 @@ if ( ! class_exists( 'WC_IIKO_API' ) ) {
          * @param $order_id
          */
         public function generate_data_for_iiko( $order_id ){
-            self::$access_token = self::get_iiko_access_token();
-            self::$organization_id = self::get_iiko_organization_id()[0]->id;
-            $items_for_request = self::get_order_info_for_request( $order_id );
-//            var_dump($items_for_request);
+            self::$access_token = trim(self::get_iiko_access_token(), '"');
+            self::$organization_id = self::get_iiko_organization_id()[0]['id'];
+//            $items_for_request = self::get_order_info_for_request( $order_id );
+//            $created_order_iiko = self::create_order_in_iiko( $items_for_request );
+
+
         }
 
         protected static function get_iiko_access_token() {
-//            $iiko_login = get_option('woocommerce_iiko_login');
-//            $iiko_password = get_option('woocommerce_iiko_password');
-            $iiko_login = 'demoDelivery';
-            $iiko_password = 'PI1yFaKFCGvvJKi';
-            $requestUrl = self::$api_url . 'auth/access_token?user_id=' . $iiko_login . '&user_secret=' . $iiko_password;
+            $iiko_login = get_option('woocommerce_iiko_login');
+            $iiko_password = get_option('woocommerce_iiko_password');
+//            $iiko_login = 'demoDelivery';
+//            $iiko_password = 'PI1yFaKFCGvvJKi';
+            $requestUrl = self::$api_url . 'auth/access_token';
+            $params = array(
+                'user_id'     => $iiko_login,
+                'user_secret' => $iiko_password
+            );
             $communication = new Communication();
 
-            return $communication::httpGetRequest($requestUrl);
+            return $communication::httpGetRequest($requestUrl, $params);
 
         }
 
         protected static function get_iiko_organization_id() {
-            $requestUrl = self::$api_url . 'organization/list?access_token=' . self::$access_token . '&request_timeout=00:01:00';
+            $requestUrl = self::$api_url . 'organization/list';
+            $params = array(
+                'access_token' => self::$access_token
+            );
             $communication = new Communication();
-
-            return $communication::httpGetRequest($requestUrl);
+            $orgList = $communication::httpGetRequest($requestUrl, $params);
+            return $orgList;
         }
-        protected static function get_iiko_nomenclatures() {
 
-            $requestUrl = self::$api_url . 'nomenclature/'. self::$organization_id . '?access_token='. self::$access_token;
-            $communication = new Communication();
-
-            $nomenclatures = $communication::httpGetRequest($requestUrl);
-
-            return $nomenclatures->products;
-        }
+//        protected static function get_iiko_nomenclatures() {
+//
+//            $requestUrl = self::$api_url . 'nomenclature/'. self::$organization_id . '?access_token='. self::$access_token;
+//            $communication = new Communication();
+//            $nomenclatures = $communication::httpGetRequest($requestUrl);
+//
+//            return $nomenclatures->products;
+//        }
 
         protected static function get_create_iiko_customer( $order, $userPhone ){
-            $userPhone = '71235678901';
-            $requestUrl = self::$api_url . 'customers/get_customer_by_phone?access_token='. self::$access_token . '&organization='. self::$organization_id . '&phone=' . $userPhone;
+            $requestUrl = self::$api_url . 'customers/get_customer_by_phone';
+            $params = array(
+                'access_token' => self::$access_token,
+                'organization' => self::$organization_id,
+                'phone'        => $userPhone
+            );
             $communication = new Communication();
-            $customer = $communication::httpGetRequest($requestUrl);
+            $customer = $communication::httpGetRequest($requestUrl, $params);
 
             if ( isset($customer->message) && strripos( $customer->message, 'There is no user with phone') == false ) {
 
@@ -88,7 +101,7 @@ if ( ! class_exists( 'WC_IIKO_API' ) ) {
                 );
                 $customer = $communication::httpPostRequest($requestUrl, json_encode($postFields));
             }
-            return $customer->id;
+            return $customer['id'];
 
         }
 
@@ -123,10 +136,30 @@ if ( ! class_exists( 'WC_IIKO_API' ) ) {
         }
 
         protected static function get_payment_methods(){
-            $requestUrl = self::$api_url . 'rmsSettings/getPaymentTypes?organization='. self::$organization_id . '&access_token='. self::$access_token;
+            $requestUrl = self::$api_url . 'rmsSettings/getPaymentTypes';
+            $params = array(
+                'organization' => self::$organization_id,
+                'access_token' => self::$access_token
+            );
+
             $communication = new Communication();
-            $payment_methods = $communication::httpGetRequest($requestUrl);
-            var_dump($payment_methods);
+            $payment_methods = $communication::httpGetRequest($requestUrl, $params);
+
+            return $payment_methods;
+
+        }
+
+        protected static function get_delivery_terminals(){
+            $requestUrl = self::$api_url . 'deliverysettings/getDeliveryTerminals';
+            $params = array(
+                'organization' => self::$organization_id,
+                'access_token' => self::$access_token
+            );
+
+            $communication = new Communication();
+            $delivery_terminals = $communication::httpGetRequest($requestUrl, $params);
+
+            return $delivery_terminals;
 
         }
 
@@ -135,15 +168,28 @@ if ( ! class_exists( 'WC_IIKO_API' ) ) {
             $billing_phone = self::get_formatted_phone( $order->get_billing_phone() );
             $iiko_customer = self::get_create_iiko_customer( $order, $billing_phone );
             $payment_methods = self::get_payment_methods();
+            $order_payment_method = $order->get_payment_method();
+//            $delivery_terminals = self::get_delivery_terminals();
+
+            if ( $order_payment_method == 'cod' ) {
+                $iiko_payment_type = array_search('CASH', array_column($payment_methods['paymentTypes'], 'code'));
+            } else {
+                $iiko_payment_type = array_search('LPAY', array_column($payment_methods['paymentTypes'], 'code'));
+            }
+            $iiko_payment_method = $payment_methods['paymentTypes'][$iiko_payment_type];
+            $order_date = date( 'Y-m-d H:i:s', $order->get_date_created()->getOffsetTimestamp());
+
             $array_product = array();
             // Get and Loop Over Order Items
             foreach ( $order->get_items() as $item_id => $item ) {
-                $product_id = $item->get_product_id();
-                if( $item->get_type() == 'variable' ) {
-                    $product_id =  $item->get_variation_id();
-                }
                 $product = $item->get_product();
+                if( $product->get_type() == 'variation' ) {
+                    $product_id =  $item->get_variation_id();
+                } else {
+                    $product_id = $item->get_product_id();
+                }
                 $iiko_product_id = get_post_meta($product_id, 'iiko_product_id', true);
+
                 $array_product[] = array(
                     "id"     => $iiko_product_id,
                     "name"   => $item->get_name(),
@@ -151,48 +197,57 @@ if ( ! class_exists( 'WC_IIKO_API' ) ) {
                     "code"   => $product->get_sku(),
                     "sum"    => $item->get_total(),
                 );
+
             }
 
-//            $order_details = array(
-//                "organization" => self::$organization_id,
-//                "customer" => array(
-//                    "id" => $iiko_customer,
-//                    "name" => $order->get_billing_first_name(),
-//                    "phone" => $billing_phone,
-//                    "email" => $order->get_billing_email()
-//                ),
-//                "order" => array(
-//                    "date" => $order->get_date_created();,
-//                    "phone" => $billing_phone,
-//                    "customerName" => $order->get_billing_first_name() . ' ' . $order->get_billing_last_name(),
-//                    "fullSum" => $order->get_total();,
-//                    "isSelfService" => 'false',
-//                    "items" => $array_product
-//                ),
-//                "address" => array(
-//                    "city" => $order->get_billing_city();,
-//                    "street" => $order->get_billing_address_1();,
-//                    "home" => $order->get_billing_address_2();,
-//                    "housing" => null,
-//                    "apartment" => null,
-//                    "entrance" => null,
-//                    "floor" => null,
-//                    "doorphone" => null,
-//                    "comment" => $order->get_customer_note();
-//                ),
-//                "paymentItems" => array(
-//                    "sum"  => $order->get_total();,
-//                    "paymentType"  => array(
-//                        "id"  => $paymentTypeId,
-//                        "code"  => $paymentTypeCode,
-//                        "name"  => "",
-//                        "comment"  => "full"
-//                    ),
-//                    "isProcessedExternally"  => true
-//                )
-//            );
+            $order_details = array(
+                "organization" => self::$organization_id,
+//                "deliveryTerminalId" => $delivery_terminal_id,
+                "customer" => array(
+                    "id" => $iiko_customer,
+                    "name" => $order->get_billing_first_name(),
+                    "phone" => $billing_phone,
+                    "email" => $order->get_billing_email()
+                ),
+                "order" => array(
+                    "date" => $order_date,
+                    "phone" => $billing_phone,
+                    "customerName" => $order->get_billing_first_name() . ' ' . $order->get_billing_last_name(),
+                    "fullSum" => $order->get_total(),
+                    "isSelfService" => 'false',
+                    "items" => $array_product
+                ),
+                "address" => array(
+                    "city" => $order->get_billing_city(),
+                    "street" => $order->get_billing_address_1(),
+                    "home" => $order->get_billing_address_2(),
+                    "housing" => null,
+                    "apartment" => null,
+                    "entrance" => null,
+                    "floor" => null,
+                    "doorphone" => null,
+                    "comment" => $order->get_customer_note()
+                ),
+                "paymentItems" => array(
+                    "sum"  => $order->get_total(),
+                    "paymentType"  => array(
+                        "id"  => $iiko_payment_method["id"],
+                        "code"  => $iiko_payment_method["code"],
+                        "name"  => $iiko_payment_method["name"]
+                    ),
+                    "isProcessedExternally"  => true
+                )
+            );
 
-            return json_encode($array_product);
+            return $order_details;
+        }
+
+        protected static function create_order_in_iiko( $items_for_request ) {
+            $requestUrl = self::$api_url . 'orders/add?access_token='. self::$access_token . '&organization='. self::$organization_id;
+            $communication = new Communication();
+            $order = $communication::httpPostRequest($requestUrl, json_encode($items_for_request));
+
+            return $order;
         }
     }
     WC_IIKO_API::instance();
