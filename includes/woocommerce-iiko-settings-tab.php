@@ -53,25 +53,6 @@ if ( ! class_exists( 'WC_IIKO_SETTINGS_TAB' ) ) {
                         'id' => 'woocommerce_iiko_password',
                         'css' => 'min-width:300px;',
                     ),
-//                    array(
-//                        'name' => __( 'Group 2', 'wc-iiko' ),
-//                        'type' => 'title',
-//                        'desc' => '',
-//                        'id'   => 'myplugin_group2_options',
-//                    ),
-//                    array(
-//                        'type'     => 'select',
-//                        'id'       => 'myplugin_select_1',
-//                        'name'     => __( 'What should happen?', 'wc-iiko' ),
-//                        'options'  => array(
-//                            'something' => __( 'Something', 'wc-iiko' ),
-//                            'nothing' 	=> __( 'Nothing', 'wc-iiko' ),
-//                            'idk'    	=> __( 'IDK', 'wc-iiko' ),
-//                        ),
-//                        'class'    => 'wc-enhanced-select',
-//                        'desc_tip' => __( 'Don\'t ask me!', 'wc-iiko' ),
-//                        'default'  => 'idk',
-//                    ),
                     array(
                         'type' => 'sectionend',
                         'id' => 'woocommerce_iiko_api_settings'

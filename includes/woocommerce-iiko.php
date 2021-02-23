@@ -36,9 +36,14 @@ if ( ! class_exists( 'WC_IIKO_API' ) ) {
         public function generate_data_for_iiko( $order_id ){
             self::$access_token = trim(self::get_iiko_access_token(), '"');
             self::$organization_id = self::get_iiko_organization_id()[0]['id'];
-//            $items_for_request = self::get_order_info_for_request( $order_id );
-//            $created_order_iiko = self::create_order_in_iiko( $items_for_request );
+            $items_for_request = self::get_order_info_for_request( $order_id );
 
+//            $created_order_iiko = self::create_order_in_iiko( $items_for_request );
+            if ( empty( $created_order_iiko ) ) {
+                self::send_notification_to_admin( $order_id, false );
+            } else {
+                self::send_notification_to_admin( $order_id );
+            }
 
         }
 
@@ -68,15 +73,6 @@ if ( ! class_exists( 'WC_IIKO_API' ) ) {
             return $orgList;
         }
 
-//        protected static function get_iiko_nomenclatures() {
-//
-//            $requestUrl = self::$api_url . 'nomenclature/'. self::$organization_id . '?access_token='. self::$access_token;
-//            $communication = new Communication();
-//            $nomenclatures = $communication::httpGetRequest($requestUrl);
-//
-//            return $nomenclatures->products;
-//        }
-
         protected static function get_create_iiko_customer( $order, $userPhone ){
             $requestUrl = self::$api_url . 'customers/get_customer_by_phone';
             $params = array(
@@ -87,8 +83,7 @@ if ( ! class_exists( 'WC_IIKO_API' ) ) {
             $communication = new Communication();
             $customer = $communication::httpGetRequest($requestUrl, $params);
 
-            if ( isset($customer->message) && strripos( $customer->message, 'There is no user with phone') == false ) {
-
+            if ( isset($customer["message"]) && strripos( $customer["message"], 'There is no user with phone') == 0 ) {
                 $requestUrl = self::$api_url . 'customers/create_or_update?access_token='. self::$access_token . '&organization='. self::$organization_id;
                 $postFields = array(
                     'customer' => array(
@@ -105,7 +100,7 @@ if ( ! class_exists( 'WC_IIKO_API' ) ) {
 
         }
 
-        protected static function get_formatted_phone($phone, $mask = '#', $codeSplitter = '0') {
+        protected static function get_formatted_phone( $phone, $mask = '#' ) {
             $format = array(
                 '13'=>'+############', // for +38 0XX XX XXX XX or 38 0XX XX XXX XX
                 '10'=>'+38##########', // for 0XX XX XXX XX
@@ -164,12 +159,21 @@ if ( ! class_exists( 'WC_IIKO_API' ) ) {
         }
 
         protected static function get_order_info_for_request( $order_id ) {
-            $order = wc_get_order( $order_id );
-            $billing_phone = self::get_formatted_phone( $order->get_billing_phone() );
-            $iiko_customer = self::get_create_iiko_customer( $order, $billing_phone );
-            $payment_methods = self::get_payment_methods();
+            $order                = wc_get_order( $order_id );
+            $billing_phone        = self::get_formatted_phone( $order->get_billing_phone() );
+            $iiko_customer        = self::get_create_iiko_customer( $order, $billing_phone );
+            $payment_methods      = self::get_payment_methods();
             $order_payment_method = $order->get_payment_method();
-//            $delivery_terminals = self::get_delivery_terminals();
+            $shipping_method      = $order->get_shipping_method();
+            $delivery_terminals   = self::get_delivery_terminals();
+
+            $pos = strripos($shipping_method, 'Липки');
+            if ($pos === false) {
+                $iiko_delivery_terminal = array_search('Fujiwara Yoshi: Основная группа', array_column($delivery_terminals['deliveryTerminals'], 'deliveryRestaurantName'));
+            } else {
+                $iiko_delivery_terminal = array_search('Новопечерские Липки: Драгомирова', array_column($delivery_terminals['deliveryTerminals'], 'deliveryRestaurantName'));
+            }
+            $delivery_terminal_id = $delivery_terminals['deliveryTerminals'][$iiko_delivery_terminal]['deliveryTerminalId'];
 
             if ( $order_payment_method == 'cod' ) {
                 $iiko_payment_type = array_search('CASH', array_column($payment_methods['paymentTypes'], 'code'));
@@ -202,7 +206,7 @@ if ( ! class_exists( 'WC_IIKO_API' ) ) {
 
             $order_details = array(
                 "organization" => self::$organization_id,
-//                "deliveryTerminalId" => $delivery_terminal_id,
+                "deliveryTerminalId" => $delivery_terminal_id,
                 "customer" => array(
                     "id" => $iiko_customer,
                     "name" => $order->get_billing_first_name(),
@@ -248,6 +252,119 @@ if ( ! class_exists( 'WC_IIKO_API' ) ) {
             $order = $communication::httpPostRequest($requestUrl, json_encode($items_for_request));
 
             return $order;
+        }
+
+        protected static function send_notification_to_admin( $order_id, $type = true ) {
+            $subject = 'Добавление ордера в Iiko';
+            $headers = "MIME-Version: 1.0\r\n";
+            $headers .= 'Content-Type: text/html; charset=utf-8' . "\r\n";
+            $headers .= 'From: Доставка блюд из ресторана Fujiwara YOSHI <dostavka@yoshi-fujiwara.ua>' . "\r\n";
+            $recipients = get_option( 'woocommerce_new_order_settings' )["recipient"];
+            $message = self::get_mail_header();
+            if ( $type ) {
+                $message .= '<div>Ордер ' . $order_id . ' добавлен в Iiko успешно!</div>>';
+            } else{
+                $message .= '<div>Ордер ' . $order_id . ' не был добавлен в Iiko по какой-то причине! Обратитесь в техподдержку для выяснения причины!</div>';
+            }
+            $message .=  self::get_mail_footer();
+
+            $result = wp_mail( $recipients, $subject, $message, $headers );
+
+            return $result;
+        }
+
+        private static function get_mail_header() {
+            ob_start(); ?>
+            <!DOCTYPE html>
+            <html dir="<?php echo is_rtl() ? 'rtl' : 'ltr'?>">
+                <head>
+                    <meta http-equiv="Content-Type" content="text/html; charset=<?php bloginfo( 'charset' ); ?>" />
+                    <title><?php echo get_bloginfo( 'name', 'display' ); ?></title>
+                </head>
+                <body <?php echo is_rtl() ? 'rightmargin' : 'leftmargin'; ?>="0" marginwidth="0" topmargin="0" marginheight="0" offset="0">
+                    <div id="wrapper" dir="<?php echo is_rtl() ? 'rtl' : 'ltr'?>">
+                        <table border="0" cellpadding="0" cellspacing="0" height="100%" width="100%">
+                            <tr>
+                                <td align="center" valign="top">
+                                    <div id="template_header_image">
+                                        <?php
+                                        if ( $img = get_option( 'woocommerce_email_header_image' ) ) {
+                                            echo '<p style="margin-top:0;"><img src="' . esc_url( $img ) . '" alt="' . get_bloginfo( 'name', 'display' ) . '" /></p>';
+                                        }
+                                        ?>
+                                    </div>
+                                    <table border="0" cellpadding="0" cellspacing="0" width="600" id="template_container">
+                                        <tr>
+                                            <td align="center" valign="top">
+                                                <!-- Header -->
+                                                <table border="0" cellpadding="0" cellspacing="0" width="600" id="template_header">
+                                                    <tr>
+                                                        <td id="header_wrapper">
+                                                            <h1>Добавление ордера в Iiko</h1>
+                                                        </td>
+                                                    </tr>
+                                                </table>
+                                                <!-- End Header -->
+                                            </td>
+                                        </tr>
+                                        <tr>
+                                            <td align="center" valign="top">
+                                                <!-- Body -->
+                                                <table border="0" cellpadding="0" cellspacing="0" width="600" id="template_body">
+                                                    <tr>
+                                                        <td valign="top" id="body_content">
+                                                            <!-- Content -->
+                                                            <table border="0" cellpadding="20" cellspacing="0" width="100%">
+                                                                <tr>
+                                                                    <td valign="top">
+                                                                        <div id="body_content_inner">
+            <?php
+            $html = ob_get_clean();
+            return $html;
+        }
+
+        private static function get_mail_footer() {
+            ob_start(); ?>
+                                                                        </div>
+                                                                    </td>
+                                                                </tr>
+                                                            </table>
+                                                            <!-- End Content -->
+                                                        </td>
+                                                    </tr>
+                                                </table>
+                                                <!-- End Body -->
+                                            </td>
+                                        </tr>
+                                        <tr>
+                                            <td align="center" valign="top">
+                                                <!-- Footer -->
+                                                <table border="0" cellpadding="10" cellspacing="0" width="600" id="template_footer">
+                                                    <tr>
+                                                        <td valign="top">
+                                                            <table border="0" cellpadding="10" cellspacing="0" width="100%">
+                                                                <tr>
+                                                                    <td colspan="2" valign="middle" id="credit">
+                                                                        <?php echo wpautop( wp_kses_post( wptexturize( apply_filters( 'woocommerce_email_footer_text', get_option( 'woocommerce_email_footer_text' ) ) ) ) ); ?>
+                                                                    </td>
+                                                                </tr>
+                                                            </table>
+                                                        </td>
+                                                    </tr>
+                                                </table>
+                                                <!-- End Footer -->
+                                            </td>
+                                        </tr>
+                                    </table>
+                                </td>
+                            </tr>
+                        </table>
+                    </div>
+                </body>
+            </html>
+            <?php
+            $html = ob_get_clean();
+            return $html;
         }
     }
     WC_IIKO_API::instance();
